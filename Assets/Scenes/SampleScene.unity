@@ -131,6 +131,7 @@ GameObject:
   - component: {fileID: 330141217}
   - component: {fileID: 330141216}
   - component: {fileID: 330141215}
+  - component: {fileID: 330141219}
   m_Layer: 0
   m_Name: WaterSurfaceProcedural
   m_TagString: Untagged
@@ -222,6 +223,61 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &330141219
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330141214}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a2fc525d490f704ba3952412961594f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  oceanWaves:
+  - direction: {x: 1, y: 0.3}
+    wavelength: 30
+    amplitude: 0.8
+    steepness: 0.25
+    speed: 2.5
+    phaseOffset: 0
+  - direction: {x: -0.5, y: 1}
+    wavelength: 18
+    amplitude: 0.45
+    steepness: 0.4
+    speed: 3.2
+    phaseOffset: 1.046667
+  - direction: {x: 0, y: 1}
+    wavelength: 12
+    amplitude: 0.3
+    steepness: 0.55
+    speed: 4.5
+    phaseOffset: 1.57
+  - direction: {x: 1, y: -1}
+    wavelength: 8
+    amplitude: 0.2
+    steepness: 0.65
+    speed: 6
+    phaseOffset: 0.785
+  - direction: {x: -1, y: 0}
+    wavelength: 20
+    amplitude: 0.35
+    steepness: 0.3
+    speed: 2.8
+    phaseOffset: 3.14
+  activateTsunami: 0
+  tsunamiWaveSettings:
+    direction: {x: 0, y: 0}
+    wavelength: 0
+    amplitude: 0
+    steepness: 0
+    speed: 0
+    phaseOffset: 0
+  tsunamiRampUpDuration: 30
+  perlinNoiseScale: 0.1
+  perlinNoiseAmplitude: 0.05
+  perlinNoiseSpeed: {x: 0.03, y: 0.02}
 --- !u!1 &705507993
 GameObject:
   m_ObjectHideFlags: 0
