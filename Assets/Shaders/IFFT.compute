@@ -1,0 +1,83 @@
+// IFFT.compute
+#pragma kernel CSMain
+
+#define PI 3.1415926535897932384626433832795
+
+// Inputs / Outputs for the FFT process
+Texture2D<float4> _ButterflyTexture; // Pre-calculated butterfly data (rgba32f from generator)
+RWTexture2D<float4> _PingPong0; // Ping-pong texture 0 (rgba32f)
+RWTexture2D<float4> _PingPong1; // Ping-pong texture 1 (rgba32f)
+
+// Uniforms (parameters passed from C#)
+uniform int N_SIZE; // Global N size (needed for some calculations if not using butterflyTexture for everything)
+uniform int _FFT_Stage; // Current FFT stage (0 to log2(N)-1)
+uniform int _PingPongState; // Ping-pong state (0 or 1) - determines which texture is input/output
+uniform int _Direction; // FFT direction (0 for horizontal, 1 for vertical)
+
+float2 ComplexMultiply(float2 a, float2 b)
+{
+    return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+float2 ComplexAdd(float2 a, float2 b)
+{
+    return float2(a.x + b.x, a.y + b.y);
+}
+
+// --- Main Kernel Function ---
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint) N_SIZE || id.y >= (uint) N_SIZE)
+        return;
+
+    float4 butterfly_data;
+
+    if (_Direction == 0)
+    {
+        butterfly_data = _ButterflyTexture.Load(int3(_FFT_Stage, (int) id.x, 0));
+    }
+    else
+    {
+        butterfly_data = _ButterflyTexture.Load(int3(_FFT_Stage, (int) id.y, 0));
+    }
+
+    float2 w_cmp = butterfly_data.xy;
+
+    float2 p_raw, q_raw;
+
+    if (_PingPongState == 0)
+    {
+        if (_Direction == 0)
+        {
+            p_raw = _PingPong0.Load(int3((int) butterfly_data.z, (int) id.y, 0)).rg;
+            q_raw = _PingPong0.Load(int3((int) butterfly_data.w, (int) id.y, 0)).rg;
+        }
+        else
+        {
+            p_raw = _PingPong0.Load(int3((int) id.x, (int) butterfly_data.z, 0)).rg;
+            q_raw = _PingPong0.Load(int3((int) id.x, (int) butterfly_data.w, 0)).rg;
+        }
+        
+        float2 H_out = ComplexAdd(p_raw, ComplexMultiply(w_cmp, q_raw));
+        
+        _PingPong1[id.xy] = float4(H_out, 0, 1);
+    }
+    else
+    {
+        if (_Direction == 0)
+        {
+            p_raw = _PingPong1.Load(int3((int) butterfly_data.z, (int) id.y, 0)).rg;
+            q_raw = _PingPong1.Load(int3((int) butterfly_data.w, (int) id.y, 0)).rg;
+        }
+        else
+        {
+            p_raw = _PingPong1.Load(int3((int) id.x, (int) butterfly_data.z, 0)).rg;
+            q_raw = _PingPong1.Load(int3((int) id.x, (int) butterfly_data.w, 0)).rg;
+        }
+
+        float2 H_out = ComplexAdd(p_raw, ComplexMultiply(w_cmp, q_raw));
+        
+        _PingPong0[id.xy] = float4(H_out, 0, 1);
+    }
+}

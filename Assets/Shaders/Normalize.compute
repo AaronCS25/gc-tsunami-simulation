@@ -1,0 +1,37 @@
+// Normalize.compute
+#pragma kernel CSMain
+
+// --- Entradas ---
+RWTexture2D<float4> InputData_PingPong0;
+RWTexture2D<float4> InputData_PingPong1;
+
+uniform int _FinalPingPongState;
+uniform int N_SIZE;
+
+// --- Salida ---
+RWTexture2D<float> OutputData;
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint) N_SIZE || id.y >= (uint) N_SIZE)
+        return;
+
+    float perm_sign = (fmod(float(id.x + id.y), 2.0) == 0.0) ? 1.0 : -1.0;
+
+    float h_value;
+
+    if (_FinalPingPongState == 0)
+    {
+        h_value = InputData_PingPong0[id.xy].r;
+    }
+    else
+    {
+        h_value = InputData_PingPong1[id.xy].r;
+    }
+
+    float norm = 0.01;
+    float normalized_h = perm_sign * (h_value * norm);
+
+    OutputData[id.xy] = normalized_h;
+}

@@ -1,0 +1,121 @@
+// TimeEvolution.compute
+#pragma kernel CSMain
+
+// --- Constantes ---
+static const float PI = 3.1415926535897932384626433832795;
+static const float G_ACCEL = 9.81;
+
+// --- Inputs ---
+uniform int N; // N: Tamaño de la malla (N x N)
+uniform float L; // L: Longitud física de la malla en metros
+uniform float time; // time: Tiempo actual de la simulación en segundos
+
+// Texturas de espectro inicial de SpectrumGenerator
+Texture2D<float4> H0_Spectrum; // h0(k) (xy: real, imag; zw: 0, 1)
+Texture2D<float4> H0_Spectrum_Conjugate; // h0(-k) (xy: real, imag; zw: 0, 1)
+
+// --- Outputs ---
+RWTexture2D<float4> Ht_Spectrum_Y; // Output: Spectrum for height (dy) -> h(k,t)
+RWTexture2D<float4> Ht_Spectrum_X; // Output: Spectrum for X displacement (dx) -> Dx(k,t)
+RWTexture2D<float4> Ht_Spectrum_Z; // Output: Spectrum for Z displacement (dz) -> Dz(k,t)
+
+// --- SLOPE SPECTRA ---
+RWTexture2D<float4> Ht_Spectrum_SlopeX; // Output: Spectrum for d(h)/dx
+RWTexture2D<float4> Ht_Spectrum_SlopeZ; // Output: Spectrum for d(h)/dz
+
+
+// --- Funciones Auxiliares ---
+// Multiplicación compleja: (a.x + i*a.y) * (b.x + i*b.y) = (a.x*b.x - a.y*b.y) + i*(a.x*b.y + a.y*b.x)
+float2 ComplexMultiply(float2 a, float2 b)
+{
+    return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+// Suma compleja
+float2 ComplexAdd(float2 a, float2 b)
+{
+    return float2(a.x + b.x, a.y + b.y);
+}
+
+// Conjugado complejo
+float2 ComplexConjugate(float2 c)
+{
+    return float2(c.x, -c.y);
+}
+
+// Euler's formula: exp(i*theta) = cos(theta) + i*sin(theta)
+float2 ComplexExp(float theta)
+{
+    float s, c;
+    sincos(theta, s, c);
+    return float2(c, s);
+}
+
+// --- Kernel Principal ---
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint) N || id.y >= (uint) N)
+        return;
+    
+    float2 x_coord_mapped = float2(id.xy) - float(N) / 2.0;
+    float2 k = float2(2.0 * PI * x_coord_mapped.x / L, 2.0 * PI * x_coord_mapped.y / L); // Vector de onda k
+
+    float k_magnitude = length(k); // Magnitud de k
+    if (k_magnitude < 0.00001)
+        k_magnitude = 0.00001;
+
+    float omega = sqrt(G_ACCEL * k_magnitude); // Frecuencia angular omega(k) = sqrt(g * |k|)
+
+    // Si k = (0,0), omega es 0, y el espectro debe ser 0.
+    if (k_magnitude < 0.00001)
+    {
+        Ht_Spectrum_Y[id.xy] = float4(0.0, 0.0, 0, 1);
+        Ht_Spectrum_X[id.xy] = float4(0.0, 0.0, 0, 1);
+        Ht_Spectrum_Z[id.xy] = float4(0.0, 0.0, 0, 1);
+        Ht_Spectrum_SlopeX[id.xy] = float4(0.0, 0.0, 0, 1);
+        Ht_Spectrum_SlopeZ[id.xy] = float4(0.0, 0.0, 0, 1);
+        return;
+    }
+
+    float2 h0k_val = H0_Spectrum[id.xy].rg;
+
+    float2 h0minusk_val_raw = H0_Spectrum_Conjugate[id.xy].rg;
+    float2 h0minusk_val_conj = ComplexConjugate(h0minusk_val_raw);
+
+    // Calcular exp(i*omega*t) y exp(-i*omega*t)
+    float angle_w_t = omega * time;
+    float2 exp_iwt = ComplexExp(angle_w_t);
+    float2 exp_minus_iwt = ComplexConjugate(exp_iwt);
+
+    // Calcular h(k,t) (Espectro de altura vertical)
+    // h(k,t) = h0(k) * exp(iwt) + h0*(-k) * exp(-iwt)
+    float2 h_k_t_y = ComplexAdd(
+                        ComplexMultiply(h0k_val, exp_iwt),
+                        ComplexMultiply(h0minusk_val_conj, exp_minus_iwt)
+                    );
+
+    // Calcular los espectros para desplazamiento horizontal (Dx y Dz)
+    // Dx(k,t) = (i * -kx / |k|) * h(k,t)
+    float2 dx_factor_complex = float2(0.0, -k.x / k_magnitude);
+    float2 h_k_t_x = ComplexMultiply(dx_factor_complex, h_k_t_y);
+
+    // Dz(k,t) = (i * -kz / |k|) * h(k,t)
+    float2 dz_factor_complex = float2(0.0, -k.y / k_magnitude);
+    float2 h_k_t_z = ComplexMultiply(dz_factor_complex, h_k_t_y);
+
+    // --- Espectros de Pendiente ---
+    // Sx(k,t) = i * kx * h(k,t)
+    float2 slopeX_factor_complex = float2(0.0, k.x); // Solo 'i * kx'
+    float2 h_k_t_slopeX = ComplexMultiply(slopeX_factor_complex, h_k_t_y);
+
+    // Sz(k,t) = i * kz * h(k,t)
+    float2 slopeZ_factor_complex = float2(0.0, k.y); // Solo 'i * kz' (k.y es kz)
+    float2 h_k_t_slopeZ = ComplexMultiply(slopeZ_factor_complex, h_k_t_y);
+
+    Ht_Spectrum_Y[id.xy] = float4(h_k_t_y, 0, 1);
+    Ht_Spectrum_X[id.xy] = float4(h_k_t_x, 0, 1);
+    Ht_Spectrum_Z[id.xy] = float4(h_k_t_z, 0, 1);
+    Ht_Spectrum_SlopeX[id.xy] = float4(h_k_t_slopeX, 0, 1);
+    Ht_Spectrum_SlopeZ[id.xy] = float4(h_k_t_slopeZ, 0, 1);
+}

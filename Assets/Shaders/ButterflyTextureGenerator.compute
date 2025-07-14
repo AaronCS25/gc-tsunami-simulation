@@ -1,0 +1,60 @@
+// ButterflyTextureGenerator.compute
+#pragma kernel CSMain
+
+#define PI 3.1415926535897932384626433832795
+
+// Output: A 2D texture (logN x N) storing (Twiddle.real, Twiddle.imag, input_idx_p, input_idx_q)
+RWTexture2D<float4> _ButterflyTexture;
+
+// Input: A ComputeBuffer containing pre-calculated bit-reversed indices
+StructuredBuffer<int> _BitReversedIndices;
+
+uniform int N;
+
+[numthreads(1, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint stage_idx = id.x;
+    uint row_col_idx = id.y;
+
+    float k_twiddle_raw = (float) row_col_idx * (float(N) / pow(2.0, stage_idx + 1.0));
+    float k_twiddle = k_twiddle_raw % (float) N;
+
+    float2 twiddle_factor = float2(cos(2.0 * PI * k_twiddle / float(N)), -sin(2.0 * PI * k_twiddle / float(N)));
+
+    int butterfly_span = 1 << stage_idx;
+    
+    int butterfly_wing = ((row_col_idx % (1 << (stage_idx + 1))) < (1 << stage_idx)) ? 1 : 0;
+
+    float4 output_data;
+    output_data.xy = twiddle_factor;
+
+    if (stage_idx == 0)
+    {
+        if (butterfly_wing == 1)
+        {
+            output_data.z = (float) _BitReversedIndices[row_col_idx];
+            output_data.w = (float) _BitReversedIndices[row_col_idx + 1];
+        }
+        else
+        {
+            output_data.z = (float) _BitReversedIndices[row_col_idx - 1];
+            output_data.w = (float) _BitReversedIndices[row_col_idx];
+        }
+    }
+    else
+    {
+        if (butterfly_wing == 1)
+        {
+            output_data.z = (float) row_col_idx;
+            output_data.w = (float) (row_col_idx + butterfly_span);
+        }
+        else
+        {
+            output_data.z = (float) (row_col_idx - butterfly_span);
+            output_data.w = (float) row_col_idx;
+        }
+    }
+
+    _ButterflyTexture[id.xy] = output_data;
+}

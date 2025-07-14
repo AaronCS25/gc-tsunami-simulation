@@ -1,0 +1,111 @@
+// SpectrumGenerator.compute
+#pragma kernel CSMain
+
+// --- Constantes ---
+static const float PI = 3.1415926535897932384626433832795;
+const float G_ACCEL = 9.81;
+
+// --- Inputs ---
+uniform int N; // N: tamaño de la malla (num vertices)
+uniform float L; // L: longitud de la malla en "metros"
+uniform float ws; // ws: velocidad del viento en m/s (windspeed)
+uniform float2 wd; // wd: dirección normalizada del viento (windDirection)
+uniform float A; // A: constante de Phillips para la amplitud
+uniform float time_seed; // Una semilla para los números aleatorios, un valor constante.
+
+// --- Outputs ---
+RWTexture2D<float4> H0_Spectrum; // h0(k) (xy: real, imag; zw: 0, 1)
+RWTexture2D<float4> H0_Spectrum_Conjugate; // h0(-k) (xy: real, imag; zw: 0, 1)
+
+
+// --- Funciones Auxiliares ---
+float4 GaussianRandom4(float2 id, float seed)
+{
+    // Usa Box-Muller de forma pseudo-aleatoria, sin texturas de ruido.
+    
+    float2 uv1 = id + seed;
+    float u1 = frac(sin(dot(uv1, float2(12.9898, 78.233))) * 43758.5453);
+    float v1 = frac(sin(dot(uv1, float2(4.898, 5.233))) * 23458.5453);
+    u1 = max(1e-6, u1);
+    float R1 = sqrt(-2.0 * log(u1));
+    float Theta1 = 2.0 * PI * v1;
+    float2 xi1 = float2(R1 * cos(Theta1), R1 * sin(Theta1));
+
+    float2 uv2 = id + seed + float2(0.5, 0.5);
+    float u2 = frac(sin(dot(uv2, float2(78.233, 12.9898))) * 43758.5453 + 0.1);
+    float v2 = frac(sin(dot(uv2, float2(5.233, 4.898))) * 23458.5453 + 0.2);
+    u2 = max(1e-6, u2);
+    float R2 = sqrt(-2.0 * log(u2));
+    float Theta2 = 2.0 * PI * v2;
+    float2 xi2 = float2(R2 * cos(Theta2), R2 * sin(Theta2));
+    
+    return float4(xi1.x, xi1.y, xi2.x, xi2.y); // (real1, imag1, real2, imag2)
+}
+
+// Calcula la energía del espectro de Phillips para un vector de onda k.
+float PhillipsSpectrumMagnitude(float2 k, float wind_speed, float2 wind_direction, float A_const, float L_plane)
+{
+    float k_length = length(k);
+
+    if (k_length < 0.00001)
+    {
+        return 0.0;
+    }
+
+    float k_length_sq = k_length * k_length;
+    float k_length_4 = k_length_sq * k_length_sq;
+
+    float2 k_dir = normalize(k);
+    float2 wind_dir_norm = normalize(wind_direction);
+    
+    // Factor direccional del viento: pow(dot(k_dir, wind_dir_norm), 6.0)
+    float directional_factor = pow(dot(k_dir, wind_dir_norm), 6.0);
+
+    // Escala de Phillips L'
+    float L_prime = (wind_speed * wind_speed) / G_ACCEL;
+    float L_prime_sq = L_prime * L_prime;
+
+    // Amortiguamiento para olas largas: exp(-1.0 / (k^2 * L'^2))
+    float long_wave_damping = exp(-1.0 / (k_length_sq * L_prime_sq));
+    
+    // Amortiguamiento para olas muy cortas: exp(-k^2 * (L/2000)^2)
+    float short_wave_damping = exp(-k_length_sq * pow(L_plane / 2000.0, 2.0));
+
+    return A_const * (long_wave_damping / k_length_4) * directional_factor * short_wave_damping;
+}
+
+// --- Kernel Principal ---
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint) N || id.y >= (uint) N)
+        return;
+    
+    // Mapeo de [0, N-1] a [-N/2, N/2 - 1] para el dominio de frecuencia k
+    float2 x_coord = float2(id.xy) - float(N) / 2.0;
+
+    // Vector de onda k
+    float2 k_curr = float2(2.0 * PI * x_coord.x / L, 2.0 * PI * x_coord.y / L);
+    
+    if (k_curr.x == 0.0 && k_curr.y == 0.0)
+    {
+        H0_Spectrum[id.xy] = float4(0.0, 0.0, 0, 1);
+        H0_Spectrum_Conjugate[id.xy] = float4(0.0, 0.0, 0, 1);
+        return;
+    }
+    
+    float P_h_k_magnitude = PhillipsSpectrumMagnitude(k_curr, ws, wd, A, L);
+    P_h_k_magnitude = clamp(P_h_k_magnitude, -4000.0, 4000.0);
+    
+    float4 gauss_random_values = GaussianRandom4(id.xy, time_seed); // Genera (xi1_r, xi1_i, xi2_r, xi2_i)
+
+    // h0(k) = (xi1_r + i*xi1_i) * sqrt(Ph(k)) / sqrt(2)
+    float2 h0_k_complex = (1.0 / sqrt(2.0)) * gauss_random_values.xy * sqrt(P_h_k_magnitude);
+    H0_Spectrum[id.xy] = float4(h0_k_complex, 0, 1);
+    
+    // h0(-k) = (xi2_r + i*xi2_i) * sqrt(Ph(-k)) / sqrt(2)
+    // Ph(-k) == Ph(k), por lo que usamos la misma magnitud P_h_k_magnitude.
+    // La aleatoriedad es INDEPENDIENTE.
+    float2 h0_neg_k_complex = (1.0 / sqrt(2.0)) * gauss_random_values.zw * sqrt(P_h_k_magnitude);
+    H0_Spectrum_Conjugate[id.xy] = float4(h0_neg_k_complex, 0, 1);
+}
