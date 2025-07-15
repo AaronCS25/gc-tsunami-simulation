@@ -35,6 +35,7 @@ public class OManager : MonoBehaviour
     public RenderTexture h0_spectrum_debug;
     public RenderTexture ht_spectrum_y_debug;
     public RenderTexture displacement_map_y_debug;
+    public RenderTexture butterfly_debug;
     public RenderTexture slope_map_x_debug;
     public RenderTexture slope_map_z_debug;
 
@@ -111,6 +112,7 @@ public class OManager : MonoBehaviour
         GenerateButterflyData();
 
         GenerateInitialSpectrums();
+        if (butterfly_debug != null) Graphics.Blit(_butterflyTexture, butterfly_debug);
     }
 
     void InitializeRenderTextures()
